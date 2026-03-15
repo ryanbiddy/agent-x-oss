@@ -70,4 +70,4 @@ Star this repo to follow the build.
 
 ## License
 
-MIT License. Built by @YOURUSERNAME
+MIT License. Built by Ryan Biddy
