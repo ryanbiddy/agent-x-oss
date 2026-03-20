@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "social-reply-crew"
+version = "0.1.0"
+description = "CrewAI + browser-use + SQLite social listening and reply automation for X"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "browser-use>=0.7.6",
+  "crewai>=0.152.0",
+  "playwright>=1.53.0",
+  "pydantic>=2.8.2",
+  "python-dotenv>=1.0.1",
+]
+
+[project.scripts]
+social-reply-crew = "social_reply_crew.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
