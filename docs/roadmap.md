@@ -1,22 +1,23 @@
 # Agent X OSS - Roadmap
 
-## Now (v0.1)
-- 5 core agents with system prompts, input formats, and examples
-- Compatible with Claude Code, Codex, and any LLM API
+## Now
+
+- 5 core prompt agents with system prompts, input formats, and examples
+- Compatible with Claude Code, Codex, and standard LLM API workflows
+- `social_reply_crew` alpha for authenticated X scouting, drafting, posting, and local performance memory
 - MIT licensed
 
-## Next (v0.2)
-- Agent chaining guide (run POV Agent -> Founder Post Agent in sequence)
-- Community-contributed agents via PRs
+## Next
+
+- Better documentation for agent chaining and practical workflows
 - More examples per agent
+- Community-contributed agents and prompt improvements
+- Additional hardening for the X automation selectors and recovery paths
+- Better local testing and validation around the SQLite learning loop
 
-## Hosted version (waitlist)
-- Web playground, no setup required
-- Save your voice profile
-- Chain agents together in a flow
+## Later
 
-## Agent X Platform (later)
-- Connect X + LinkedIn
-- Analytics + momentum tracking
-- Team collaboration + approval flows
-- Guardrails + alerting
+- More automation packages beyond X reply workflows
+- Analytics and momentum tracking across social experiments
+- Collaboration and approval flows for teams
+- Guardrails and monitoring for semi-automated posting systems

@@ -2,19 +2,53 @@
 
 ## What we accept
 
-New agents: Must include `system.md`, `input-format.md`, and `example.md`. Must serve a real founder, exec, or comms use case.
+### Prompt agents
 
-Improvements to existing agents: Open a PR with what you changed, why, and a before/after example if possible.
+New agents should include:
 
-New examples: Add to any agent's folder. Real inputs and outputs only.
+- `system.md`
+- `input-format.md`
+- `example.md`
+
+They should serve a real founder, operator, executive, or comms use case.
+
+### Improvements to existing agents
+
+Open a PR with:
+
+- what changed
+- why it changed
+- a before and after example when possible
+
+### Automation app contributions
+
+Code contributions to `social_reply_crew/` are welcome, especially:
+
+- browser selector hardening
+- auth and session handling improvements
+- SQLite memory improvements
+- better digest UX
+- tests and setup docs
+
+### Examples and docs
+
+New examples, walkthroughs, and setup fixes are all useful.
 
 ## What we don't accept
-- Generic copywriting wrappers
-- Low-effort or fake examples
-- System prompts that are just "be a good writer"
+
+- generic copywriting wrappers with no clear use case
+- low-effort or fake examples
+- system prompts that are basically "be a good writer"
+- automation changes that remove the human review step before posting
 
 ## PR format
 
-Title: `[agent name] - what you changed`
+Title examples:
 
-Body: 2-3 sentences on what it does and why it's useful.
+- `[agent] improve founder post framing`
+- `[app] harden X reply metric scraping`
+- `[docs] expand setup instructions`
+
+Body:
+
+Use 2-5 sentences on what changed, why it matters, and how it was tested.

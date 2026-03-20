@@ -1,45 +1,75 @@
 # How Agent X OSS Works
 
-Agent X OSS is a prompt library, not a hosted app.
+Agent X OSS now has two layers:
 
-Each agent is a focused system prompt designed for one communications job. You pair that prompt with a real input, run it in your preferred model, and then edit the result like a human operator.
+- prompt-first agents for structured writing and review tasks
+- a runnable automation app for X social listening and reply execution
 
 ## Core idea
 
-Most AI writing tools try to do everything. These agents do one job each:
+Most AI social tools are either too generic or too automated. This repo is meant to sit in the useful middle:
+
+- prompts that are narrow enough to produce better output
+- automation that still keeps a human in the loop before posting
+- local memory so the system can learn from what actually performs
+
+## Prompt agents
+
+Each prompt agent is designed for one job:
+
 - shaping messy founder thoughts into strong posts
 - turning launch notes into a coordinated launch package
 - translating technical updates into human language
-- surfacing an executive's true point of view
+- surfacing an executive's point of view
 - reviewing a draft before it goes live
 
-That narrower scope makes the output more usable and easier to trust.
-
-## Anatomy of an agent
-
 Every agent folder includes:
-- `system.md` - the system prompt you load into your model
-- `input-format.md` - the easiest way to structure the user message
-- `example.md` - a sample input/output pair to show the intended behavior
 
-## Recommended workflow
+- `system.md` for the system prompt
+- `input-format.md` for the recommended user input shape
+- `example.md` for a sample input and output
+
+Recommended workflow:
 
 1. Pick the agent that matches the job.
-2. Copy `system.md` into your tool as the system prompt.
-3. Use `input-format.md` to shape your user message.
+2. Load `system.md` into your preferred tool.
+3. Structure the input with `input-format.md`.
 4. Run the model.
-5. Edit the result for accuracy, taste, and timing.
+5. Edit for accuracy, taste, and timing.
+
+## Automation app
+
+`social_reply_crew/` is the first runnable app in the repo.
+
+It uses:
+
+- CrewAI for agent orchestration
+- browser-use with Playwright for browser-native X automation
+- SQLite for local reply memory and engagement tracking
+
+The flow is:
+
+1. Scout the authenticated `For You` timeline.
+2. Read strong replies from inspirational accounts.
+3. Pull historical performance rules from SQLite.
+4. Draft two reply options per target post.
+5. Show a terminal digest.
+6. Wait for the human to choose or skip.
+7. Post only the selected reply and store it locally for later learning.
 
 ## Agent chaining
 
-You can also run agents in sequence. Example:
-- Start with Executive POV Agent to find the strongest angle.
-- Pass that output into Founder Post Agent to draft the post.
-- Run the final draft through Risk Check Agent before publishing.
+You can chain the prompt agents together or combine them with the automation app.
+
+Examples:
+
+- Executive POV Agent -> Founder Post Agent -> Risk Check Agent
+- social_reply_crew -> Risk Check Agent for a final human review pass
 
 ## Best practices
 
-- Use raw, specific inputs. Messy notes are better than polished blurbs.
+- Use raw, specific inputs. Messy notes beat polished blurbs.
 - Keep one clear objective per run.
-- Treat outputs as strong drafts, not auto-publish copy.
-- Preserve the human voice. The point is leverage, not impersonation.
+- Treat outputs as strong drafts, not autonomous truth.
+- Keep a human in the loop for anything public-facing.
+- Let historical performance influence style, but not override judgment.
