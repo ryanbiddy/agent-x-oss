@@ -3,5 +3,6 @@
 __pycache__/
 data/
 x_storage_state.json
+debug_screenshot.png
 *.db
 *.sqlite3

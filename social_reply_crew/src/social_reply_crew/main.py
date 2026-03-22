@@ -8,7 +8,7 @@ from social_reply_crew.browser_tools import XBrowserService
 from social_reply_crew.config import AppConfig
 from social_reply_crew.db import ReplyMemoryStore
 from social_reply_crew.digest import present_digest_and_collect_choices
-from social_reply_crew.exceptions import XAutomationError
+from social_reply_crew.exceptions import DomChangedError, XAutomationError
 
 
 def cli() -> None:
@@ -79,10 +79,15 @@ def _run_main_flow(
     focus_override: str | None,
 ) -> None:
     if refresh_first:
-        report = refresh_engagement_metrics(browser_service, memory_store)
-        print(
-            f"Engagement refresh complete: scanned {report.scanned_replies}, matched {report.matched_rows}, updated {report.updated_rows}."
-        )
+        try:
+            report = refresh_engagement_metrics(browser_service, memory_store)
+            print(
+                f"Engagement refresh complete: scanned {report.scanned_replies}, matched {report.matched_rows}, updated {report.updated_rows}."
+            )
+        except DomChangedError:
+            print(
+                "Skipping engagement refresh — could not load profile page. Run without --refresh-first to skip this step."
+            )
 
     crew = SocialReplyCrew(
         config=config,

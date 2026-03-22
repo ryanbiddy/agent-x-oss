@@ -43,6 +43,8 @@ class XBrowserService:
     async def collect_timeline_candidates(self) -> list[TimelinePost]:
         async with self._browser_session("https://x.com/home") as page:
             await self._ensure_authenticated(page)
+            if await self._requires_login(page):
+                await self._login(page, destination_url="https://x.com/home")
             await self._wait_for_timeline(page)
 
             unique_posts: dict[str, TimelinePost] = {}
@@ -65,10 +67,15 @@ class XBrowserService:
         samples: list[InspirationalReplySample] = []
         async with self._browser_session("https://x.com/home") as page:
             await self._ensure_authenticated(page)
+            if await self._requires_login(page):
+                await self._login(page, destination_url="https://x.com/home")
             for handle in self.config.inspirational_handles:
-                await page.goto(f"https://x.com/{handle}/with_replies")
+                target_url = f"https://x.com/{handle}/with_replies"
+                await page.goto(target_url)
                 await asyncio.sleep(2.5)
                 await self._guard_page(page)
+                if await self._requires_login(page):
+                    await self._login(page, destination_url=target_url)
                 await self._wait_for_tweets(page)
 
                 account_samples: list[InspirationalReplySample] = []
@@ -201,6 +208,8 @@ class XBrowserService:
             await page.goto(self.config.x_replies_tab_url)
             await asyncio.sleep(2.5)
             await self._guard_page(page)
+            if await self._requires_login(page):
+                await self._login(page, destination_url=self.config.x_replies_tab_url)
             await self._wait_for_tweets(page)
 
             unique_replies: dict[str, ReplyMetricSnapshot] = {}
@@ -263,6 +272,9 @@ class XBrowserService:
                 "X session is not authenticated. Provide X_STORAGE_STATE or X_USERNAME/X_PASSWORD."
             )
 
+        await self._login(page, destination_url="https://x.com/home")
+
+    async def _login(self, page, destination_url: str | None = None) -> None:
         await page.goto("https://x.com/i/flow/login")
         await asyncio.sleep(2.5)
 
@@ -271,8 +283,7 @@ class XBrowserService:
             ["input[autocomplete='username']", "input[name='text']"],
         )
         await username_input.fill(self.config.x_username, clear=True)
-        await page.press("Enter")
-        await asyncio.sleep(2.0)
+        await self._submit_login_step(page, ["Next", "Sign in", "Log in"])
 
         body_text = await self._body_text(page)
         if ("phone number or username" in body_text.lower() or "check your email" in body_text.lower()) and self.config.x_email:
@@ -281,16 +292,20 @@ class XBrowserService:
                 ["input[data-testid='ocfEnterTextTextInput']", "input[name='text']"],
             )
             await email_input.fill(self.config.x_email, clear=True)
-            await page.press("Enter")
-            await asyncio.sleep(2.0)
+            await self._submit_login_step(page, ["Next", "Continue"])
 
         password_input = await self._wait_for_selector(
             page,
             ["input[name='password']", "input[autocomplete='current-password']"],
         )
         await password_input.fill(self.config.x_password, clear=True)
-        await page.press("Enter")
-        await asyncio.sleep(3.0)
+        await self._submit_login_step(page, ["Log in", "Sign in"])
+        await self._wait_for_login_completion(page)
+
+        if destination_url:
+            await page.goto(destination_url)
+            await asyncio.sleep(2.5)
+            await self._guard_page(page)
 
         if not await self._looks_authenticated(page):
             raise AuthenticationRequiredError(
@@ -298,12 +313,47 @@ class XBrowserService:
             )
 
     async def _looks_authenticated(self, page) -> bool:
+        if await self._requires_login(page):
+            return False
         tweet_nodes = await page.get_elements_by_css_selector("article[data-testid='tweet']")
         if tweet_nodes:
             return True
+        authenticated_ui = await page.evaluate(
+            """
+            () => Boolean(
+              document.querySelector("a[data-testid='AppTabBar_Home_Link']") ||
+              document.querySelector("button[data-testid='SideNav_NewTweet_Button']") ||
+              document.querySelector("nav[aria-label='Primary']")
+            )
+            """
+        )
+        if self._to_bool(authenticated_ui):
+            return True
         body_text = await self._body_text(page)
-        login_markers = ("sign in to x", "join x today", "happening now")
-        return not any(marker in body_text.lower() for marker in login_markers)
+        lowered = body_text.lower()
+        if "sign in" in lowered or "join x today" in lowered:
+            return False
+        return "for you" in lowered or "following" in lowered
+
+    async def _requires_login(self, page) -> bool:
+        current_url = await self._current_url(page)
+        if "login" in current_url.lower() or "/i/flow" in current_url.lower():
+            return True
+        has_login_form = await page.evaluate(
+            """
+            () => Boolean(
+              document.querySelector("input[autocomplete='username']") ||
+              document.querySelector("input[name='text']") ||
+              document.querySelector("input[name='password']") ||
+              document.querySelector("input[autocomplete='current-password']")
+            )
+            """
+        )
+        return self._to_bool(has_login_form)
+
+    async def _current_url(self, page) -> str:
+        raw_url = await page.evaluate("() => window.location.href")
+        return raw_url if isinstance(raw_url, str) else str(raw_url or "")
 
     async def _body_text(self, page) -> str:
         raw_text = await page.evaluate("() => document.body ? document.body.innerText : ''")
@@ -334,7 +384,53 @@ class XBrowserService:
             if element is not None:
                 return element
             await asyncio.sleep(delay_seconds)
+        await self._save_debug_screenshot(page)
         raise DomChangedError(f"Failed to locate selectors: {selectors}")
+
+    async def _save_debug_screenshot(self, page) -> None:
+        try:
+            await page.screenshot(
+                path=str(self.config.app_dir / "debug_screenshot.png"),
+                full_page=True,
+            )
+        except Exception:
+            return
+
+    async def _submit_login_step(self, page, primary_labels: list[str]) -> None:
+        clicked = await self._click_button_by_text(page, primary_labels)
+        if not clicked:
+            await page.press("Enter")
+        await asyncio.sleep(2.5)
+
+    async def _click_button_by_text(self, page, labels: list[str]) -> bool:
+        clicked = await page.evaluate(
+            """
+            (labels) => {
+              const wanted = labels.map((label) => label.trim().toLowerCase());
+              const candidates = Array.from(document.querySelectorAll("button, div[role='button']"));
+              for (const candidate of candidates) {
+                const text = (candidate.innerText || candidate.textContent || "").trim().toLowerCase();
+                if (!text) continue;
+                const match = wanted.some((label) => text === label || text.includes(label));
+                if (!match) continue;
+                candidate.click();
+                return true;
+              }
+              return false;
+            }
+            """,
+            labels,
+        )
+        return self._to_bool(clicked)
+
+    async def _wait_for_login_completion(self, page, max_attempts: int = 10) -> None:
+        for _ in range(max_attempts):
+            if not await self._requires_login(page) and await self._looks_authenticated(page):
+                return
+            await asyncio.sleep(1.5)
+        raise AuthenticationRequiredError(
+            "X login did not complete. Seed X_STORAGE_STATE or use a logged-in Chrome profile."
+        )
 
     async def _first_selector(self, page, selectors: list[str]):
         for selector in selectors:
