@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -8,7 +9,22 @@ from pathlib import Path
 from statistics import median
 from typing import Callable
 
+from dotenv import load_dotenv
+
 from social_reply_crew.models import MetricsRefreshReport, ReplyMetricSnapshot, StoredReply
+
+APP_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(APP_DIR / ".env")
+
+
+def get_default_database_path() -> Path:
+    raw_path = os.getenv("DB_PATH") or os.getenv("X_DATABASE_PATH")
+    if raw_path:
+        path = Path(raw_path)
+        return path if path.is_absolute() else (APP_DIR / path).resolve()
+    data_dir = APP_DIR / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "social_reply_memory.db"
 
 
 class ReplyMemoryStore:
@@ -35,6 +51,25 @@ class ReplyMemoryStore:
             )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_replies_score ON replies(engagement_score DESC)"
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS engagement_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_handle TEXT NOT NULL,
+                    tweet_url TEXT NOT NULL,
+                    tweet_text TEXT NOT NULL,
+                    reply_text TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_engagement_log_handle ON engagement_log(source_handle)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_engagement_log_created_at ON engagement_log(created_at DESC)"
             )
             connection.commit()
 
@@ -69,6 +104,35 @@ class ReplyMemoryStore:
                 (limit,),
             ).fetchall()
         return [self._row_to_reply(row) for row in rows]
+
+    def record_interaction(
+        self,
+        source_handle: str,
+        tweet_url: str,
+        tweet_text: str,
+        reply_text: str,
+        status: str = "sent",
+    ) -> int:
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO engagement_log (
+                    source_handle, tweet_url, tweet_text, reply_text, status, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source_handle.strip() or "unknown",
+                    tweet_url,
+                    tweet_text,
+                    reply_text,
+                    status,
+                    created_at,
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
 
     def get_top_performing_replies(self, limit: int = 12) -> list[StoredReply]:
         with self._connect() as connection:
@@ -271,3 +335,26 @@ class ReplyMemoryStore:
                 f"Mirror the tone of the strongest historical reply: \"{replies[0].generated_reply[:120]}\""
             )
         return rules
+
+
+def save_approved_reply(
+    source_handle: str,
+    tweet_url: str,
+    tweet_text: str,
+    reply_text: str,
+) -> None:
+    store = ReplyMemoryStore(get_default_database_path())
+    store.initialize()
+    store.record_reply(
+        post_url=tweet_url,
+        original_tweet=tweet_text,
+        generated_reply=reply_text,
+        engagement_score=0,
+    )
+    store.record_interaction(
+        source_handle=source_handle,
+        tweet_url=tweet_url,
+        tweet_text=tweet_text,
+        reply_text=reply_text,
+        status="approved",
+    )

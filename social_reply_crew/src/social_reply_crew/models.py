@@ -11,9 +11,11 @@ class TimelinePost(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     author: str
+    author_handle: str | None = None
     text: str
     link: str
     reason: str | None = None
+    score: float | None = None
 
 
 class TimelineScoutReport(BaseModel):
@@ -74,7 +76,12 @@ class ReplyRecommendation(BaseModel):
 
     post_url: str
     author: str
+    author_handle: str | None = None
     original_text: str
+    why_surfaced: str | None = None
+    score: float | None = None
+    user_context: dict[str, Any] = Field(default_factory=dict)
+    interaction: dict[str, Any] = Field(default_factory=dict)
     options: list[ReplyOption] = Field(min_length=2, max_length=2)
 
 

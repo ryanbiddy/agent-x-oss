@@ -40,6 +40,18 @@ class XBrowserService:
     def collect_own_reply_metrics_sync(self) -> list[ReplyMetricSnapshot]:
         return asyncio.run(self.collect_own_reply_metrics())
 
+    def get_user_context_sync(self, handle: str) -> dict[str, Any]:
+        return asyncio.run(self.get_user_context(handle))
+
+    def scrape_account_tweets_for_voice_sync(self, handle: str, limit: int = 200) -> list[dict[str, str]]:
+        return asyncio.run(self.scrape_account_tweets_for_voice(handle=handle, limit=limit))
+
+    def scrape_linkedin_about_sync(self, linkedin_url: str) -> str:
+        return asyncio.run(self.scrape_linkedin_about(linkedin_url))
+
+    def scrape_page_text_sync(self, url: str) -> str:
+        return asyncio.run(self.scrape_page_text(url))
+
     async def collect_timeline_candidates(self) -> list[TimelinePost]:
         async with self._browser_session("https://x.com/home") as page:
             await self._ensure_authenticated(page)
@@ -225,6 +237,151 @@ class XBrowserService:
 
             return list(unique_replies.values())[: self.config.refresh_limit]
 
+    async def scrape_account_tweets_for_voice(
+        self,
+        handle: str,
+        limit: int = 200,
+    ) -> list[dict[str, str]]:
+        clean_handle = handle.lstrip("@")
+        target_url = f"https://x.com/{clean_handle}"
+        async with self._browser_session(target_url) as page:
+            await self._ensure_logged_in(page)
+            await page.goto(target_url)
+            await asyncio.sleep(2.5)
+            await self._guard_page(page)
+            await self._wait_for_tweets(page)
+
+            unique_tweets: dict[str, dict[str, str]] = {}
+            for _ in range(10):
+                payload = await page.evaluate(
+                    """
+                    (cleanHandle) => JSON.stringify(
+                      Array.from(document.querySelectorAll("article[data-testid='tweet']")).map((article) => {
+                        const textNodes = Array.from(article.querySelectorAll("div[data-testid='tweetText']"));
+                        const text = textNodes.map((node) => node.innerText || "").join("\\n").trim();
+                        const linkNode = Array.from(article.querySelectorAll("a[href*='/status/']")).find((anchor) => {
+                          const href = anchor.getAttribute("href") || "";
+                          return href.startsWith(`/${cleanHandle}/status/`) && !href.includes("/analytics");
+                        });
+                        if (!text || !linkNode) return null;
+                        return {
+                          text,
+                          link: linkNode.href.split("?")[0]
+                        };
+                      }).filter(Boolean)
+                    )
+                    """,
+                    clean_handle,
+                )
+                for item in json.loads(payload or "[]"):
+                    text = str(item.get("text") or "").strip()
+                    if len(text) < 10:
+                        continue
+                    unique_tweets.setdefault(
+                        text,
+                        {
+                            "text": text,
+                            "link": str(item.get("link") or "").strip(),
+                        },
+                    )
+                if len(unique_tweets) >= limit:
+                    break
+                await page.evaluate("() => window.scrollBy(0, window.innerHeight * 0.9)")
+                await asyncio.sleep(1.5)
+                await self._guard_page(page)
+
+            return list(unique_tweets.values())[:limit]
+
+    async def scrape_linkedin_about(self, linkedin_url: str) -> str:
+        async with self._browser_session(linkedin_url) as page:
+            await page.goto(linkedin_url)
+            await asyncio.sleep(3.0)
+            raw_text = await page.evaluate(
+                """
+                () => {
+                  const selectors = [
+                    ".about-section",
+                    "#about",
+                    "[id*='about']",
+                    "[data-generated-suggestion-target]"
+                  ];
+                  for (const selector of selectors) {
+                    const node = document.querySelector(selector);
+                    if (node && (node.innerText || "").trim()) {
+                      return node.innerText.trim();
+                    }
+                  }
+                  return document.body ? document.body.innerText : "";
+                }
+                """
+            )
+            return raw_text if isinstance(raw_text, str) else str(raw_text or "")
+
+    async def scrape_page_text(self, url: str) -> str:
+        async with self._browser_session(url) as page:
+            await page.goto(url)
+            await asyncio.sleep(2.0)
+            return await self._body_text(page)
+
+    async def get_user_context(self, handle: str) -> dict[str, Any]:
+        clean_handle = handle.lstrip("@")
+        target_url = f"https://x.com/{clean_handle}"
+        context: dict[str, Any] = {
+            "handle": f"@{clean_handle}" if clean_handle else handle,
+            "followers": "unknown",
+            "bio": "",
+            "is_followed_back": False,
+        }
+        if not clean_handle:
+            return context
+
+        try:
+            async with self._browser_session(target_url) as page:
+                await self._ensure_logged_in(page)
+                await page.goto(target_url)
+                await asyncio.sleep(2.5)
+                await self._guard_page(page)
+                if await self._requires_login(page):
+                    await self._login(page, destination_url=target_url)
+
+                payload = await page.evaluate(
+                    """
+                    () => {
+                      const followerNode =
+                        document.querySelector("a[href$='/followers'] span") ||
+                        document.querySelector("a[href$='/verified_followers'] span") ||
+                        document.querySelector("[data-testid='UserProfileHeader_Items']");
+                      const bioNode = document.querySelector("[data-testid='UserDescription']");
+                      const handleNode = Array.from(document.querySelectorAll("a[href^='/']")).find((anchor) => {
+                        const href = anchor.getAttribute("href") || "";
+                        return /^\\/[A-Za-z0-9_]+$/.test(href);
+                      });
+                      return JSON.stringify({
+                        followers: followerNode ? (followerNode.innerText || followerNode.textContent || "") : "",
+                        bio: bioNode ? (bioNode.innerText || bioNode.textContent || "") : "",
+                        handle: handleNode ? handleNode.getAttribute("href") : "",
+                        is_followed_back: Boolean(document.querySelector("[data-testid='userFollowIndicator']"))
+                      });
+                    }
+                    """
+                )
+                parsed = json.loads(payload or "{}")
+                follower_text = str(parsed.get("followers") or "")
+                follower_match = re.search(r"([\d.,]+(?:[KkMmBb])?)", follower_text)
+                if follower_match:
+                    context["followers"] = follower_match.group(1)
+                bio_text = str(parsed.get("bio") or "").strip()
+                if bio_text:
+                    context["bio"] = bio_text
+                handle_value = str(parsed.get("handle") or "").strip().lstrip("/")
+                if handle_value:
+                    context["handle"] = f"@{handle_value}"
+                context["is_followed_back"] = self._to_bool(parsed.get("is_followed_back"))
+        except Exception:
+            return context
+
+        return context
+
     @asynccontextmanager
     async def _browser_session(self, initial_url: str):
         browser = self._build_browser()
@@ -273,6 +430,9 @@ class XBrowserService:
             )
 
         await self._login(page, destination_url="https://x.com/home")
+
+    async def _ensure_logged_in(self, page) -> None:
+        await self._ensure_authenticated(page)
 
     async def _login(self, page, destination_url: str | None = None) -> None:
         await page.goto("https://x.com/i/flow/login")
@@ -448,6 +608,10 @@ class XBrowserService:
                 if (articleText.includes("Promoted")) return null;
 
                 const authorNode = article.querySelector("div[data-testid='User-Name'] span");
+                const handleNode = Array.from(article.querySelectorAll("a[href^='/']")).find((anchor) => {
+                  const href = anchor.getAttribute("href") || "";
+                  return /^\\/[A-Za-z0-9_]+$/.test(href);
+                });
                 const textNodes = Array.from(article.querySelectorAll("div[data-testid='tweetText']"));
                 const text = textNodes.map((node) => node.innerText || "").join("\\n").trim();
                 const linkNode = Array.from(article.querySelectorAll("a[href*='/status/']")).find((anchor) => {
@@ -457,6 +621,7 @@ class XBrowserService:
 
                 return {
                   author: authorNode ? authorNode.textContent.trim() : "",
+                  author_handle: handleNode ? handleNode.getAttribute("href").replace("/", "") : "",
                   text,
                   link: linkNode ? linkNode.href.split("?")[0] : ""
                 };
@@ -472,6 +637,7 @@ class XBrowserService:
             posts.append(
                 TimelinePost(
                     author=item.get("author") or "Unknown",
+                    author_handle=(item.get("author_handle") or "").strip() or None,
                     text=item["text"].strip(),
                     link=item["link"].strip(),
                 )

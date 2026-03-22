@@ -10,9 +10,59 @@ from pydantic import BaseModel, PrivateAttr
 from social_reply_crew.browser_tools import XBrowserService
 from social_reply_crew.config import AppConfig
 from social_reply_crew.db import ReplyMemoryStore
+from social_reply_crew.interaction_history import get_interaction_history
+from social_reply_crew.memory_store import load_memory_context
 from social_reply_crew.models import PerformanceRuleset, ReplyDigest, TimelineScoutReport, ToneAnalysisReport
+from social_reply_crew.voice_intake import get_voice_context_for_prompt
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
+
+ANTI_AI_LANGUAGE_RULES = """ANTI-AI LANGUAGE RULES - FOLLOW THESE STRICTLY:
+
+NEVER USE these words or phrases under any circumstances:
+- "game-changer" or "game changer"
+- "breakthrough"
+- "revolutionary" or "revolutionize"
+- "paradigm shift"
+- "cutting-edge" or "cutting edge"
+- "next-generation"
+- "innovative" or "innovation"
+- "transformative"
+- "seamless"
+- "leverage" (as a verb)
+- "utilize" (use "use" instead)
+- "it's worth noting"
+- "the reality is"
+- "at the end of the day"
+- "in today's world"
+- "the truth is"
+- "needless to say"
+- "I couldn't agree more"
+- "absolutely"
+- "definitely"
+- "certainly"
+- "the [noun] apocalypse"
+- "the future of [X]"
+- "the power of [X]"
+
+NEVER start a reply with:
+- "The [anything]" as a dramatic opener
+- "I've been" (too common, sounds template-like)
+- A rhetorical question
+- Agreement ("Great point", "Exactly", "This")
+
+ALWAYS write like a specific human:
+- Use concrete nouns, not abstractions
+- Reference actual tools, actual numbers, actual experiences
+- Vary sentence length - short then long then short
+- Leave some things unsaid - humans don't over-explain
+- If using humor, make it dry and specific, not broad
+- End with something that invites response, not demands it
+"""
+
+
+def get_anti_ai_rules() -> str:
+    return ANTI_AI_LANGUAGE_RULES
 
 
 class TimelineScoutBrowserTool(BaseTool):
@@ -91,6 +141,8 @@ class SocialReplyCrew:
 
     def build_digest(self, focus_override: str | None = None) -> ReplyDigest:
         focus_brief = focus_override or self.config.focus_brief
+        memory_context = load_memory_context()
+        voice_context = get_voice_context_for_prompt(memory_context)
         timeline_tool = TimelineScoutBrowserTool(browser_service=self.browser_service)
         tone_tool = ToneSamplesBrowserTool(browser_service=self.browser_service)
         performance_tool = HistoricalPerformanceTool(memory_store=self.memory_store)
@@ -134,12 +186,27 @@ class SocialReplyCrew:
             verbose=False,
         )
 
+        reply_drafter = Agent(
+            role="Reply Drafter",
+            goal="Draft replies that sound unmistakably like the user instead of a generic AI assistant.",
+            backstory=(
+                f"{ANTI_AI_LANGUAGE_RULES}\n\n"
+                f"{voice_context or 'No voice fingerprint exists yet. Default to shorter, sharper, more human replies.'}\n\n"
+                "You write as a specific human with lived experience, not as a summarizer. "
+                "You keep replies concrete, grounded, and lightly unfinished in the way real people write."
+            ),
+            llm=self.config.crew_model,
+            allow_delegation=False,
+            max_iter=3,
+            verbose=False,
+        )
+
         scout_task = Task(
             description=(
                 "Use the timeline_scout_browser tool once to collect candidate posts from the authenticated For You timeline. "
                 f"Select exactly {self.config.timeline_post_limit} posts that are most relevant to these focus areas: {focus_brief}. "
                 "Prefer posts that are timely, substantive, and naturally invite a high-value reply. "
-                "Return valid JSON with keys focus_summary and posts. Each post must include author, text, link, and a concise reason."
+                "Return valid JSON with keys focus_summary and posts. Each post must include author, author_handle when available, text, link, a concise reason, and an optional numeric score."
             ),
             expected_output=(
                 f"JSON with a focus_summary string and exactly {self.config.timeline_post_limit} selected posts."
@@ -172,6 +239,8 @@ class SocialReplyCrew:
 
         draft_task = Task(
             description=(
+                f"{ANTI_AI_LANGUAGE_RULES}\n\n"
+                f"{voice_context}\n\n"
                 "Using the context from the timeline scout, tone analyzer, and performance analyst, draft exactly two reply options for each selected post. "
                 "Option 1 should lean witty, rhythmic, and socially sharp. "
                 "Option 2 should lean analytical, insight-dense, and strategically useful. "
@@ -183,21 +252,69 @@ class SocialReplyCrew:
                 "Each option must include style_label, reply_text, and rationale."
             ),
             expected_output="JSON digest containing two reply options per selected post.",
-            agent=tone_analyzer,
+            agent=reply_drafter,
             context=[scout_task, tone_task, performance_task],
             output_pydantic=ReplyDigest,
         )
 
         crew = Crew(
-            agents=[timeline_scout, tone_analyzer, performance_analyst],
+            agents=[timeline_scout, tone_analyzer, performance_analyst, reply_drafter],
             tasks=[scout_task, tone_task, performance_task, draft_task],
             process=Process.sequential,
             verbose=False,
         )
         crew.kickoff()
+        scout_report = self._coerce_task_output(scout_task, TimelineScoutReport)
         digest = self._coerce_task_output(draft_task, ReplyDigest)
         digest.recommendations = digest.recommendations[: self.config.timeline_post_limit]
+        self._enrich_digest(digest, scout_report)
         return digest
+
+    def _enrich_digest(self, digest: ReplyDigest, scout_report: TimelineScoutReport) -> None:
+        scout_map = {post.link: post for post in scout_report.posts}
+        total_posts = max(len(digest.recommendations), 1)
+
+        for index, recommendation in enumerate(digest.recommendations, start=1):
+            scout_post = scout_map.get(recommendation.post_url)
+            if scout_post:
+                recommendation.why_surfaced = scout_post.reason or recommendation.why_surfaced
+                recommendation.author_handle = (
+                    scout_post.author_handle
+                    or recommendation.author_handle
+                    or self._normalize_handle(recommendation.author)
+                )
+                recommendation.score = scout_post.score or recommendation.score or float(total_posts - index + 1)
+            else:
+                recommendation.author_handle = recommendation.author_handle or self._normalize_handle(
+                    recommendation.author
+                )
+                recommendation.score = recommendation.score or float(total_posts - index + 1)
+                recommendation.why_surfaced = recommendation.why_surfaced or "Matches the selected focus areas."
+
+            handle_for_context = recommendation.author_handle or recommendation.author
+            recommendation.user_context = self._safe_user_context(handle_for_context)
+            recommendation.interaction = get_interaction_history(handle_for_context)
+
+    def _safe_user_context(self, handle: str) -> dict[str, object]:
+        try:
+            return self.browser_service.get_user_context_sync(handle)
+        except Exception:
+            clean_handle = self._normalize_handle(handle) or handle
+            return {
+                "handle": f"@{clean_handle.lstrip('@')}" if clean_handle else handle,
+                "followers": "unknown",
+                "bio": "",
+                "is_followed_back": False,
+            }
+
+    @staticmethod
+    def _normalize_handle(raw_author: str | None) -> str | None:
+        if not raw_author:
+            return None
+        for token in raw_author.replace("\n", " ").split():
+            if token.startswith("@") and len(token) > 1:
+                return token
+        return None
 
     @staticmethod
     def _coerce_task_output(task: Task, model_type: type[ModelType]) -> ModelType:
@@ -218,3 +335,44 @@ class SocialReplyCrew:
             return model_type.model_validate_json(raw_output)
 
         raise RuntimeError(f"Unable to coerce task output into {model_type.__name__}.")
+
+
+def digest_to_review_tweets(digest: ReplyDigest) -> list[dict[str, object]]:
+    tweets: list[dict[str, object]] = []
+    for recommendation in digest.recommendations:
+        tweets.append(
+            {
+                "handle": recommendation.author_handle or recommendation.author,
+                "author": recommendation.author,
+                "text": recommendation.original_text,
+                "link": recommendation.post_url,
+                "score": recommendation.score,
+                "why_surfaced": recommendation.why_surfaced,
+                "user_context": recommendation.user_context,
+                "interaction": recommendation.interaction,
+                "replies": [
+                    {
+                        "text": option.reply_text,
+                        "why": option.rationale,
+                        "style_label": option.style_label,
+                    }
+                    for option in recommendation.options
+                ],
+            }
+        )
+    return tweets
+
+
+def build_digest_tweets(
+    config: AppConfig,
+    browser_service: XBrowserService,
+    memory_store: ReplyMemoryStore,
+    focus_override: str | None = None,
+) -> list[dict[str, object]]:
+    crew = SocialReplyCrew(
+        config=config,
+        browser_service=browser_service,
+        memory_store=memory_store,
+    )
+    digest = crew.build_digest(focus_override=focus_override)
+    return digest_to_review_tweets(digest)

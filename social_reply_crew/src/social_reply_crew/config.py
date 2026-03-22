@@ -100,7 +100,7 @@ class AppConfig:
                 os.getenv("X_INSPIRATION_REPLIES_PER_ACCOUNT", "4")
             ),
             refresh_limit=int(os.getenv("X_REFRESH_LIMIT", "30")),
-            reply_character_limit=int(os.getenv("X_REPLY_CHARACTER_LIMIT", "260")),
+            reply_character_limit=int(os.getenv("X_REPLY_CHARACTER_LIMIT", "280")),
         )
 
     @property

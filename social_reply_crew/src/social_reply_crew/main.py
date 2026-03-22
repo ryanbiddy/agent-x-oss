@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import time
 
-from social_reply_crew.agents import SocialReplyCrew
+from social_reply_crew.agents import SocialReplyCrew, build_digest_tweets
 from social_reply_crew.browser_tools import XBrowserService
 from social_reply_crew.config import AppConfig
 from social_reply_crew.db import ReplyMemoryStore
 from social_reply_crew.digest import present_digest_and_collect_choices
 from social_reply_crew.exceptions import DomChangedError, XAutomationError
+from social_reply_crew.memory_store import load_memory_context
+from social_reply_crew.voice_intake import get_voice_context_for_prompt
 
 
 def cli() -> None:
@@ -45,6 +48,17 @@ def cli() -> None:
             browser_service=browser_service,
             memory_store=memory_store,
             interval_minutes=args.interval_minutes,
+        )
+        return
+    if command == "intake":
+        asyncio.run(_run_voice_intake_flow(browser_service=browser_service, config=config))
+        return
+    if command == "ui":
+        _run_ui_flow(
+            config=config,
+            browser_service=browser_service,
+            memory_store=memory_store,
+            focus_override=args.focus,
         )
         return
     raise ValueError(f"Unsupported command: {command}")
@@ -86,7 +100,7 @@ def _run_main_flow(
             )
         except DomChangedError:
             print(
-                "Skipping engagement refresh — could not load profile page. Run without --refresh-first to skip this step."
+                "Skipping engagement refresh - could not load profile page. Run without --refresh-first to skip this step."
             )
 
     crew = SocialReplyCrew(
@@ -95,7 +109,8 @@ def _run_main_flow(
         memory_store=memory_store,
     )
     digest = crew.build_digest(focus_override=focus_override)
-    selections = present_digest_and_collect_choices(digest)
+    voice_context = get_voice_context_for_prompt(load_memory_context())
+    selections = present_digest_and_collect_choices(digest, voice_context=voice_context)
 
     for selection in selections:
         if selection.chosen_option is None:
@@ -113,9 +128,45 @@ def _run_main_flow(
                 generated_reply=selection.chosen_option.reply_text,
                 engagement_score=0,
             )
+            memory_store.record_interaction(
+                source_handle=selection.recommendation.author_handle
+                or selection.recommendation.author,
+                tweet_url=selection.recommendation.post_url,
+                tweet_text=selection.recommendation.original_text,
+                reply_text=selection.chosen_option.reply_text,
+                status="sent",
+            )
             print(f"Posted reply to {selection.recommendation.post_url}")
         except XAutomationError as exc:
             print(f"Failed to post reply to {selection.recommendation.post_url}: {exc}")
+
+
+async def _run_voice_intake_flow(
+    browser_service: XBrowserService,
+    config: AppConfig,
+) -> None:
+    from social_reply_crew.voice_intake import run_voice_intake
+
+    x_handle = config.x_username or config.x_profile_url.rsplit("/", 1)[-1]
+    await run_voice_intake(browser_service, x_handle)
+
+
+def _run_ui_flow(
+    config: AppConfig,
+    browser_service: XBrowserService,
+    memory_store: ReplyMemoryStore,
+    focus_override: str | None,
+) -> None:
+    from social_reply_crew.web_ui import load_session_tweets, start_ui
+
+    tweets = build_digest_tweets(
+        config=config,
+        browser_service=browser_service,
+        memory_store=memory_store,
+        focus_override=focus_override,
+    )
+    load_session_tweets(tweets)
+    start_ui()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -137,6 +188,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Refresh historical engagement metrics before drafting new replies.",
     )
 
+    intake_parser = subparsers.add_parser(
+        "intake",
+        help="Run voice intake to build your style fingerprint.",
+    )
+    intake_parser.add_argument(
+        "--focus",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+
     subparsers.add_parser(
         "refresh-metrics",
         help="Scrape the authenticated user's Replies tab and update SQLite engagement scores.",
@@ -151,6 +212,16 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=30,
         help="How often to refresh reply engagement metrics.",
+    )
+
+    ui_parser = subparsers.add_parser(
+        "ui",
+        help="Open web UI for digest review.",
+    )
+    ui_parser.add_argument(
+        "--focus",
+        default=None,
+        help="Optional focus override used when selecting relevant timeline posts.",
     )
 
     return parser
