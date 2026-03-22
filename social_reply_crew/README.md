@@ -27,21 +27,32 @@ social_reply_crew/
 
 ## Setup
 
-1. Create a Python 3.11+ virtual environment.
-2. Install the package:
+```bash
+cd social_reply_crew
+python -m venv .venv
 
-   ```bash
-   pip install -e .
-   ```
+# Mac/Linux:
+source .venv/bin/activate
 
-3. Install browser runtimes:
+# Windows (PowerShell):
+.\.venv\Scripts\Activate.ps1
 
-   ```bash
-   playwright install chromium
-   ```
+# Windows (Command Prompt):
+.venv\Scripts\activate.bat
 
-4. Copy `.env.example` to `.env` and fill in your keys and X credentials.
-5. Prefer seeding `X_STORAGE_STATE` with an authenticated session. `browser-use` uses Playwright-compatible storage state JSON, so the file can be reused across runs.
+pip install -e .
+playwright install chromium
+
+# Copy environment file and fill in your values
+cp .env.example .env        # Mac/Linux
+copy .env.example .env      # Windows
+```
+
+> **Important:** Never commit your `.env` file. It contains your credentials.
+> The `.env.example` file is safe to share - it contains no real values.
+
+Fill in your keys and X credentials after copying the environment file. If possible,
+seed `X_STORAGE_STATE` with an authenticated session so `browser-use` can reuse it.
 
 ## Usage
 

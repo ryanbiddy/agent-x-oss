@@ -6,9 +6,7 @@ Agent X OSS is a free, open-source repo for AI-assisted social workflows. It inc
 
 The goal is simple: help people build stronger social presence and faster feedback loops without turning into full-time content operators.
 
-## What's In The Repo
-
-### Prompt Agents
+## Prompt Agents
 
 | Agent | What it does |
 |---|---|
@@ -18,7 +16,7 @@ The goal is simple: help people build stronger social presence and faster feedba
 | Executive POV Agent | Surfaces your narrative angles and strongest takes |
 | Risk Check Agent | Flags tone issues, timing risks, and posting mistakes before you publish |
 
-### Automation App
+## Automation App
 
 `social_reply_crew/` is a modular Python app built with CrewAI, browser-use, Playwright, and SQLite. It can:
 
@@ -28,6 +26,20 @@ The goal is simple: help people build stronger social presence and faster feedba
 - draft two reply options per post
 - present a terminal digest for human selection
 - post the selected reply through browser DOM automation
+
+## Two Ways To Use This Repo
+
+**Not a developer? Start here ->**
+Use the prompt agents. No coding required. Each agent folder has a system prompt
+you can paste directly into Claude, ChatGPT, or any AI tool you already use.
+[Jump to Prompt Agents](#prompt-agents)
+
+**Developer or builder? Start here ->**
+Run the full automation app. Scrapes your X timeline, drafts replies in your voice,
+learns from your engagement history. Requires Python and X credentials.
+[Jump to Automation App](#automation-app)
+
+---
 
 ## Quick Start
 
@@ -53,7 +65,16 @@ These can be used in Claude Code, Codex, ChatGPT projects, or directly through a
 ```bash
 cd social_reply_crew
 python -m venv .venv
+
+# Mac/Linux:
+source .venv/bin/activate
+
+# Windows (PowerShell):
 .\.venv\Scripts\Activate.ps1
+
+# Windows (Command Prompt):
+.venv\Scripts\activate.bat
+
 pip install -e .
 playwright install chromium
 copy .env.example .env
