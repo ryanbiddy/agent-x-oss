@@ -67,7 +67,10 @@ class AppConfig:
 
         return cls(
             app_dir=app_dir,
-            database_path=_resolve_optional_path(app_dir, os.getenv("X_DATABASE_PATH"))
+            database_path=_resolve_optional_path(
+                app_dir,
+                os.getenv("DB_PATH") or os.getenv("X_DATABASE_PATH"),
+            )
             or (data_dir / "social_reply_memory.db"),
             storage_state_path=storage_state_path,
             x_profile_url=os.getenv("X_PROFILE_URL", "").rstrip("/"),
@@ -78,8 +81,9 @@ class AppConfig:
             chrome_profile_directory=os.getenv("X_PROFILE_DIRECTORY") or None,
             chrome_user_data_dir=_resolve_optional_path(app_dir, os.getenv("X_USER_DATA_DIR")),
             chrome_executable_path=_resolve_optional_path(app_dir, os.getenv("X_EXECUTABLE_PATH")),
-            browser_headless=_read_bool("X_HEADLESS", False),
-            crew_model=os.getenv("CREW_LLM_MODEL", "openai/gpt-4.1-mini"),
+            browser_headless=_read_bool("HEADLESS_BROWSER", _read_bool("X_HEADLESS", False)),
+            crew_model=os.getenv("LLM_MODEL")
+            or os.getenv("CREW_LLM_MODEL", "anthropic/claude-sonnet-4-20250514"),
             inspirational_handles=_read_csv(
                 "X_INSPIRATIONAL_HANDLES",
                 ("gregisenberg", "sahilbloom", "naval"),
@@ -88,7 +92,9 @@ class AppConfig:
                 "X_FOCUS_AREAS",
                 ("AI agents", "browser automation", "developer tools"),
             ),
-            timeline_candidate_limit=int(os.getenv("X_TIMELINE_CANDIDATE_LIMIT", "12")),
+            timeline_candidate_limit=int(
+                os.getenv("MAX_TWEETS_PER_RUN", os.getenv("X_TIMELINE_CANDIDATE_LIMIT", "12"))
+            ),
             timeline_post_limit=int(os.getenv("X_TIMELINE_POST_LIMIT", "5")),
             inspiration_replies_per_account=int(
                 os.getenv("X_INSPIRATION_REPLIES_PER_ACCOUNT", "4")

@@ -2,6 +2,19 @@
 
 > Open-source social agents and automation for founders, operators, and comms teams.
 
+## Two Ways To Use This Repo
+
+**Not a developer?**
+Use the [Prompt Agents](#prompt-agents) - paste a system prompt into Claude,
+ChatGPT, or Codex. No coding required.
+
+**Builder or developer?**
+Run the [Automation App](#automation-app) - scrapes your X timeline, drafts
+replies in your voice, learns from your engagement history. Requires Python
+and X credentials.
+
+---
+
 Agent X OSS is a free, open-source repo for AI-assisted social workflows. It includes prompt-first agents for writing and review, plus a runnable Python automation app for authenticated X social listening and reply drafting.
 
 The goal is simple: help people build stronger social presence and faster feedback loops without turning into full-time content operators.
@@ -26,20 +39,6 @@ The goal is simple: help people build stronger social presence and faster feedba
 - draft two reply options per post
 - present a terminal digest for human selection
 - post the selected reply through browser DOM automation
-
-## Two Ways To Use This Repo
-
-**Not a developer? Start here ->**
-Use the prompt agents. No coding required. Each agent folder has a system prompt
-you can paste directly into Claude, ChatGPT, or any AI tool you already use.
-[Jump to Prompt Agents](#prompt-agents)
-
-**Developer or builder? Start here ->**
-Run the full automation app. Scrapes your X timeline, drafts replies in your voice,
-learns from your engagement history. Requires Python and X credentials.
-[Jump to Automation App](#automation-app)
-
----
 
 ## Quick Start
 
@@ -77,7 +76,8 @@ source .venv/bin/activate
 
 pip install -e .
 playwright install chromium
-copy .env.example .env
+cp .env.example .env        # Mac/Linux
+copy .env.example .env      # Windows
 social-reply-crew run --refresh-first
 ```
 
